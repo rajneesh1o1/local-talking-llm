@@ -105,6 +105,21 @@ pip install -e .
 python -c "import nltk; nltk.download('punkt')"
 ```
 
+#### Option 3: Using pip + requirements.txt (Curated)
+
+If you specifically want `pip install -r requirements.txt`, use this flow (Python **3.11+**):
+
+```bash
+cd local-talking-llm
+python3 -m venv venv
+source venv/bin/activate
+python -m pip install -U pip
+pip install -r requirements.txt
+
+# NLTK data used by the TTS sentence splitter
+python -c "import nltk; nltk.download('punkt_tab')"
+```
+
 #### Install and Setup Ollama
 
 ```bash
@@ -118,6 +133,22 @@ ollama pull gemma3  # or any other model you prefer
 #### Basic Usage
 ```bash
 python app.py
+```
+
+#### Using a remote Ollama server (different machine)
+
+```bash
+python app.py --ollama-url http://192.168.1.146:11434 --model llama3.2:latest
+```
+
+#### Performance knobs (TTS)
+
+```bash
+# Faster (may reduce quality)
+python app.py --tts-steps 200
+
+# Let the app auto-pick steps based on response length (recommended)
+python app.py --tts-steps 0
 ```
 
 #### With Voice Cloning
