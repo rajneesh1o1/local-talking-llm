@@ -16,13 +16,6 @@ warnings.filterwarnings(
 
 class TextToSpeechService:
     def __init__(self, device: str | None = None):
-        """
-        Initializes the TextToSpeechService class with ChatterBox TTS.
-
-        Args:
-            device (str, optional): The device to be used for the model. If None, will auto-detect.
-                Can be "cuda", "mps", or "cpu".
-        """
         if device is None:
             if torch.cuda.is_available():
                 self.device = "cuda"
@@ -47,17 +40,13 @@ class TextToSpeechService:
         self._patch_chatterbox_generate()
 
     def _ensure_nltk(self):
-        """Ensure required NLTK tokenizer data is present for sent_tokenize."""
         try:
             nltk.data.find("tokenizers/punkt_tab/english/")
         except LookupError:
             nltk.download("punkt_tab")
 
     def _patch_chatterbox_generate(self):
-        """
-        Monkeypatch ChatterboxTTS.generate to accept `max_new_tokens` (the upstream code hardcodes 1000).
-        This lets us reduce sampling steps and speed up TTS substantially without editing site-packages.
-        """
+        # Monkeypatch: allow max_new_tokens (upstream hardcodes 1000)
 
         def generate_patched(
             model_self,
@@ -73,7 +62,6 @@ class TextToSpeechService:
             else:
                 assert model_self.conds is not None, "Please `prepare_conditionals` first or specify `audio_prompt_path`"
 
-            # Update exaggeration if needed
             if exaggeration != model_self.conds.t3.emotion_adv[0, 0, 0]:
                 _cond = model_self.conds.t3
                 from chatterbox.models.t3.modules.cond_enc import T3Cond
@@ -84,7 +72,6 @@ class TextToSpeechService:
                     emotion_adv=exaggeration * torch.ones(1, 1, 1),
                 ).to(device=model_self.device)
 
-            # Norm and tokenize text
             text = punc_norm(text)
             text_tokens = model_self.tokenizer.text_to_tokens(text).to(model_self.device)
             text_tokens = torch.cat([text_tokens, text_tokens], dim=0)  # Need two seqs for CFG
@@ -102,7 +89,6 @@ class TextToSpeechService:
                     temperature=temperature,
                     cfg_weight=cfg_weight,
                 )
-                # Extract only the conditional batch.
                 speech_tokens = speech_tokens[0]
                 speech_tokens = drop_invalid_tokens(speech_tokens).to(model_self.device)
 
@@ -114,14 +100,9 @@ class TextToSpeechService:
                 watermarked_wav = model_self.watermarker.apply_watermark(wav, sample_rate=model_self.sr)
             return torch.from_numpy(watermarked_wav).unsqueeze(0)
 
-        # Patch instance method
         self.model.generate = types.MethodType(generate_patched, self.model)
 
     def _patch_torch_load(self):
-        """
-        Patches torch.load to automatically map tensors to the correct device.
-        This is needed because ChatterBox models may have been saved on CUDA.
-        """
         map_location = torch.device(self.device)
 
         if not hasattr(torch, '_original_load'):
@@ -143,19 +124,7 @@ class TextToSpeechService:
         temperature: float = 0.8,
         max_new_tokens: int = 300,
     ):
-        """
-        Synthesizes audio from the given text using ChatterBox TTS.
-
-        Args:
-            text (str): The input text to be synthesized.
-            audio_prompt_path (str, optional): Path to audio file for voice cloning. Defaults to None.
-            exaggeration (float, optional): Emotion exaggeration control (0-1). Defaults to 0.5.
-            cfg_weight (float, optional): Control for pacing and delivery. Defaults to 0.5.
-
-        Returns:
-            tuple: A tuple containing the sample rate and the generated audio array.
-        """
-        # Cache conditioning so we don't re-embed the same reference audio every turn.
+        # Cache conditioning for repeated voice prompts.
         if audio_prompt_path:
             if (self._last_audio_prompt_path != audio_prompt_path) or (self.model.conds is None):
                 self.model.prepare_conditionals(audio_prompt_path, exaggeration=exaggeration)
@@ -171,7 +140,6 @@ class TextToSpeechService:
             max_new_tokens=max_new_tokens,
         )
 
-        # Convert tensor to numpy array format compatible with sounddevice
         audio_array = wav.squeeze().cpu().numpy()
         return self.sample_rate, audio_array
 
@@ -184,18 +152,6 @@ class TextToSpeechService:
         temperature: float = 0.9,
         max_new_tokens: int = 1000,
     ):
-        """
-        Synthesizes audio from the given long-form text using ChatterBox TTS.
-
-        Args:
-            text (str): The input text to be synthesized.
-            audio_prompt_path (str, optional): Path to audio file for voice cloning. Defaults to None.
-            exaggeration (float, optional): Emotion exaggeration control (0-1). Defaults to 0.5.
-            cfg_weight (float, optional): Control for pacing and delivery. Defaults to 0.5.
-
-        Returns:
-            tuple: A tuple containing the sample rate and the generated audio array.
-        """
         pieces = []
         sentences = nltk.sent_tokenize(text)
         silence = np.zeros(int(0.25 * self.sample_rate))
@@ -214,14 +170,6 @@ class TextToSpeechService:
         return self.sample_rate, np.concatenate(pieces)
 
     def save_voice_sample(self, text: str, output_path: str, audio_prompt_path: str | None = None):
-        """
-        Saves a voice sample to file for later use as voice prompt.
-
-        Args:
-            text (str): The text to synthesize.
-            output_path (str): Path where to save the audio file.
-            audio_prompt_path (str, optional): Path to audio file for voice cloning.
-        """
         if audio_prompt_path:
             if (self._last_audio_prompt_path != audio_prompt_path) or (self.model.conds is None):
                 self.model.prepare_conditionals(audio_prompt_path)
