@@ -14,7 +14,7 @@ from memory import (
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-GEMINI_API_KEY = "AIzaSyDQASCxtJ4TIbXbTgqGP0GOkrWK1p8kf-Y"
+GEMINI_API_KEY = "AIzaSyDOKZB0LcVgassqpZAPQpXRJnNcssMsv04"
 MODEL = "gemini-2.5-flash"
 
 # Memory configuration

@@ -118,10 +118,10 @@ def insert_message(
             cur.execute("""
                 INSERT INTO conversation_memory 
                 (conversation_id, message_index, role, text, embedding, type, priority)
-                VALUES (%s, %s, %s, %s, %s::vector, %s, %s)
+                VALUES (%s::uuid, %s, %s, %s, %s::vector, %s, %s)
                 RETURNING id
             """, (
-                conversation_id,
+                str(conversation_id),
                 message_index,
                 role,
                 text,
@@ -223,19 +223,19 @@ def get_recent_messages(
                     SELECT id, conversation_id, message_index, role, text, 
                            embedding, type, priority, created_at
                     FROM conversation_memory
-                    WHERE conversation_id = %s AND role = %s
+                    WHERE conversation_id = %s::uuid AND role = %s
                     ORDER BY message_index DESC
                     LIMIT %s
-                """, (conversation_id, role, limit))
+                """, (str(conversation_id), role, limit))
             else:
                 cur.execute("""
                     SELECT id, conversation_id, message_index, role, text, 
                            embedding, type, priority, created_at
                     FROM conversation_memory
-                    WHERE conversation_id = %s
+                    WHERE conversation_id = %s::uuid
                     ORDER BY message_index DESC
                     LIMIT %s
-                """, (conversation_id, limit))
+                """, (str(conversation_id), limit))
             
             results = cur.fetchall()
             return [dict(row) for row in results]

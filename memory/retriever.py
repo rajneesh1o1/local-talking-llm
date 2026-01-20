@@ -41,8 +41,8 @@ def search_similar_messages(
             params = []
             
             if conversation_id:
-                where_clauses.append("conversation_id = %s")
-                params.append(conversation_id)
+                where_clauses.append("conversation_id = %s::uuid")
+                params.append(str(conversation_id))
             
             if priority_threshold is not None:
                 where_clauses.append("(priority IS NULL OR priority > %s)")
