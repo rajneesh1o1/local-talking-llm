@@ -97,4 +97,7 @@ virtualenv==20.31.2
 zipp==3.22.0
 zstandard==0.23.0
 
+# Piper TTS (fast local TTS)
+piper-tts==1.3.0
+onnxruntime==1.18.1
 

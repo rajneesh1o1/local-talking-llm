@@ -11,7 +11,7 @@ from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_core.runnables.history import RunnableWithMessageHistory
 from langchain_core.chat_history import InMemoryChatMessageHistory
 from langchain_ollama import OllamaLLM
-from tts import TextToSpeechService
+from tts import TextToSpeechService, PiperTTSService
 
 console = Console()
 stt = whisper.load_model("base.en")
@@ -20,14 +20,43 @@ parser = argparse.ArgumentParser(description="Local Voice Assistant with Chatter
 parser.add_argument("--voice", type=str, default="voices/tinker_bell_trimmed.wav", help="Path to voice sample for cloning (default: voices/tinker_bell_trimmed.wav)")
 parser.add_argument("--exaggeration", type=float, default=0.7, help="Emotion exaggeration (0.0-1.0)")
 parser.add_argument("--cfg-weight", type=float, default=0.7, help="CFG weight for pacing (0.0-1.0)")
-parser.add_argument("--model", type=str, default="gemma3", help="Ollama model to use")
+parser.add_argument("--model", type=str, default="gpt-oss:20b", help="Ollama model to use")
 parser.add_argument("--ollama-url", type=str, default="http://localhost:11434", help="Ollama base URL, e.g. http://localhost:11434")
 parser.add_argument("--save-voice", action="store_true", help="Save generated voice samples")
 parser.add_argument("--tts-steps", type=int, default=1000, help="TTS sampling steps (lower = faster). Use 0 for auto (recommended).")
 parser.add_argument("--tts-temperature", type=float, default=0.9, help="TTS sampling temperature (default: 0.8)")
+parser.add_argument("--tts-backend", type=str, default="chatterbox", choices=["chatterbox", "piper"], help="TTS backend")
+# parser.add_argument("--piper-model", type=str, default="piper/en_US-amy-low.onnx", help="Path to Piper .onnx model")
+# parser.add_argument("--piper-config", type=str, default="piper/en_Us-amy-low.onnx.json", help="Path to Piper .onnx.json config (optional)")
+
+
+parser.add_argument("--piper-model", type=str, default="piper/en_US-kristin-medium.onnx", help="Path to Piper .onnx model")
+parser.add_argument("--piper-config", type=str, default="piper/en_US-kristin-medium.onnx.json", help="Path to Piper .onnx.json config (optional)")
+
+
+parser.add_argument("--piper-speaker", type=int, default=-1, help="Piper speaker id (optional)")
+parser.add_argument("--piper-length-scale", type=float, default=0.0, help="Piper length_scale (optional; <1 faster, >1 slower)")
+parser.add_argument("--piper-noise-scale", type=float, default=0.0, help="Piper noise_scale (optional)")
+parser.add_argument("--piper-noise-w", type=float, default=0.0, help="Piper noise_w (optional)")
 args = parser.parse_args()
 
-tts = TextToSpeechService()
+if args.tts_backend == "piper":
+    # Hardcoded defaults live in argparse defaults above. You can still override via flags if you want.
+    piper_config = args.piper_config.strip() or None
+    piper_speaker = None if args.piper_speaker < 0 else args.piper_speaker
+    piper_length_scale = None if args.piper_length_scale <= 0 else args.piper_length_scale
+    piper_noise_scale = None if args.piper_noise_scale <= 0 else args.piper_noise_scale
+    piper_noise_w = None if args.piper_noise_w <= 0 else args.piper_noise_w
+    tts = PiperTTSService(
+        model_path=args.piper_model.strip(),
+        config_path=piper_config,
+        speaker=piper_speaker,
+        length_scale=piper_length_scale,
+        noise_scale=piper_noise_scale,
+        noise_w=piper_noise_w,
+    )
+else:
+    tts = TextToSpeechService()
 
 prompt_template = ChatPromptTemplate.from_messages([
     ("system", "You are a helpful and friendly AI assistant. You are polite, respectful, and aim to provide concise responses (1-2 sentences)."),
@@ -76,12 +105,23 @@ def transcribe(audio_np: np.ndarray) -> str:
 def get_llm_response(text: str) -> str:
     session_id = "voice_assistant_session"
 
-    response = chain_with_history.invoke(
-        {"input": text},
-        config={"session_id": session_id}
-    )
-
-    return response.strip()
+    try:
+        response = chain_with_history.invoke(
+            {"input": text},
+            config={"session_id": session_id}
+        )
+        return response.strip()
+    except Exception as e:
+        msg = str(e)
+        if "model" in msg and "not found" in msg:
+            raise RuntimeError(
+                f"{msg}\n\n"
+                "Fix: run `ollama list` and then pass an installed model:\n"
+                "  python app.py --model llama3.2:latest\n"
+                "Or pull it:\n"
+                "  ollama pull llama3.2\n"
+            ) from e
+        raise
 
 
 def play_audio(sample_rate, audio_array):
@@ -103,12 +143,19 @@ def analyze_emotion(text: str) -> float:
 
 
 if __name__ == "__main__":
-    console.print("[cyan]🤖 Local Voice Assistant with ChatterBox TTS")
+    console.print("[cyan]🤖 Local Voice Assistant")
     console.print("[cyan]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
 
-    if args.voice and not os.path.exists(args.voice):
-        console.print(f"[yellow]Default voice file not found: {args.voice} — using built-in voice.[/yellow]")
-        args.voice = None
+    if args.tts_backend == "piper":
+        if not args.piper_model:
+            raise SystemExit("Missing --piper-model (required when --tts-backend piper)")
+        if args.voice:
+            console.print("[yellow]Note: --voice is ignored for Piper (no voice cloning).[/yellow]")
+            args.voice = None
+    else:
+        if args.voice and not os.path.exists(args.voice):
+            console.print(f"[yellow]Default voice file not found: {args.voice} — using built-in voice.[/yellow]")
+            args.voice = None
 
     if args.voice:
         console.print(f"[green]Using voice cloning from: {args.voice}")
@@ -125,7 +172,7 @@ if __name__ == "__main__":
         os.makedirs("voices", exist_ok=True)
 
     response_count = 0
-    t = 4
+    t = 0
 
     try:
         while True:

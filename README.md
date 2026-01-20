@@ -146,6 +146,14 @@ python app.py --tts-steps 200
 python app.py --tts-steps 0
 ```
 
+#### Piper TTS (faster, no voice cloning)
+
+Download a Piper voice (`.onnx` + `.onnx.json`) from `https://huggingface.co/rhasspy/piper-voices` and run:
+
+```bash
+python app.py --tts-backend piper --piper-model path/to/voice.onnx
+```
+
 #### With Voice Cloning
 Record a 10-30 second audio sample of the voice you want to clone, then:
 ```bash
@@ -312,3 +320,15 @@ The combination of Whisper's robust speech recognition, Ollama's flexible LLM se
 
 ---
 
+
+
+
+
+run chatter box:
+python app.py --model llama3.2:latest --ollama-url http://192.168.1.146:11434
+
+
+
+run piper
+ python app.py --tts-backend piper --piper-model piper/en_US-amy-low.onnx --piper-length-scale 0.9
+  python app.py --tts-backend piper   # add weights into the piper folder

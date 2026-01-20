@@ -5,6 +5,9 @@ import numpy as np
 import torchaudio as ta
 import types
 import torch.nn.functional as F
+import subprocess
+import tempfile
+import os
 from chatterbox.tts import ChatterboxTTS, punc_norm
 from chatterbox.models.s3tokenizer import drop_invalid_tokens
 
@@ -178,3 +181,108 @@ class TextToSpeechService:
 
         wav = self.model.generate(text, audio_prompt_path=audio_prompt_path)
         ta.save(output_path, wav, self.sample_rate)
+
+
+class PiperTTSService:
+    """
+    Piper TTS backend (fast). Uses the `piper` CLI from `piper-tts`.
+    Requires a voice model `.onnx` file (and typically a `.onnx.json` config).
+    """
+
+    def __init__(
+        self,
+        model_path: str,
+        config_path: str | None = None,
+        speaker: int | None = None,
+        length_scale: float | None = None,
+        noise_scale: float | None = None,
+        noise_w: float | None = None,
+    ):
+        self.model_path = model_path
+        self.config_path = config_path
+        self.speaker = speaker
+        self.length_scale = length_scale
+        self.noise_scale = noise_scale
+        self.noise_w = noise_w
+
+    def _resolve_config(self) -> str | None:
+        if self.config_path and os.path.exists(self.config_path):
+            return self.config_path
+
+        # Common Piper convention: model.onnx + model.onnx.json
+        candidate = f"{self.model_path}.json"
+        if os.path.exists(candidate):
+            return candidate
+
+        # Fallback: pick a .onnx.json from the same directory (handles casing mismatches)
+        model_dir = os.path.dirname(self.model_path) or "."
+        try:
+            configs = [f for f in os.listdir(model_dir) if f.lower().endswith(".onnx.json")]
+        except FileNotFoundError:
+            return None
+
+        if not configs:
+            return None
+
+        model_name = os.path.basename(self.model_path).lower()
+        for cfg in configs:
+            if cfg.lower().startswith(model_name):
+                return os.path.join(model_dir, cfg)
+
+        if len(configs) == 1:
+            return os.path.join(model_dir, configs[0])
+
+        return os.path.join(model_dir, configs[0])
+
+    def synthesize(
+        self,
+        text: str,
+        audio_prompt_path: str | None = None,  # unused; kept for interface compatibility
+        exaggeration: float = 0.5,  # unused
+        cfg_weight: float = 0.5,  # unused
+        temperature: float = 0.8,  # unused
+        max_new_tokens: int = 0,  # unused
+    ):
+        import soundfile as sf
+
+        if not self.model_path or not os.path.exists(self.model_path):
+            raise FileNotFoundError(f"Piper model not found: {self.model_path}")
+
+        cfg = self._resolve_config()
+
+        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
+            out_path = tmp.name
+
+        cmd = ["piper", "--model", self.model_path, "--output_file", out_path]
+        if cfg:
+            cmd += ["--config", cfg]
+        if self.speaker is not None:
+            cmd += ["--speaker", str(self.speaker)]
+        if self.length_scale is not None:
+            cmd += ["--length_scale", str(self.length_scale)]
+        if self.noise_scale is not None:
+            cmd += ["--noise_scale", str(self.noise_scale)]
+        if self.noise_w is not None:
+            cmd += ["--noise_w", str(self.noise_w)]
+
+        try:
+            subprocess.run(cmd, input=text, text=True, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+            audio, sr = sf.read(out_path, dtype="float32")
+            if audio.ndim > 1:
+                audio = audio[:, 0]
+            return int(sr), audio
+        except FileNotFoundError as e:
+            raise RuntimeError("Piper CLI not found. Install with: pip install piper-tts") from e
+        except subprocess.CalledProcessError as e:
+            raise RuntimeError(f"Piper failed: {e.stderr}") from e
+        finally:
+            try:
+                os.remove(out_path)
+            except Exception:
+                pass
+
+    def save_voice_sample(self, text: str, output_path: str, audio_prompt_path: str | None = None):
+        sr, audio = self.synthesize(text)
+        import soundfile as sf
+
+        sf.write(output_path, audio, sr)
