@@ -134,6 +134,8 @@ ENV/
 env.bak/
 venv.bak/
 
+
+voices/
 # Spyder project settings
 .spyderproject
 .spyproject
