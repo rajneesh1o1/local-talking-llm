@@ -25,6 +25,10 @@ def write_user_message(
         Message ID if successful, None otherwise
     """
     try:
+        logger.info(f"💾 Writing user message to PostgreSQL (index={message_index}, conv_id={conversation_id})")
+        logger.debug(f"   Text: {text[:100]}...")
+        logger.debug(f"   Embedding: {'present' if embedding else 'none'}")
+        
         message_id = insert_message(
             conversation_id=conversation_id,
             message_index=message_index,
@@ -34,9 +38,15 @@ def write_user_message(
             type=None,
             priority=None
         )
+        
+        if message_id:
+            logger.info(f"✅ User message saved to PostgreSQL (ID: {message_id})")
+        else:
+            logger.warning("⚠️ Failed to get message ID after insert")
+        
         return message_id
     except Exception as e:
-        logger.error(f"Failed to write user message: {e}")
+        logger.error(f"❌ Failed to write user message: {e}", exc_info=True)
         return None
 
 
@@ -53,6 +63,10 @@ def write_llm_message(
         Message ID if successful, None otherwise
     """
     try:
+        logger.info(f"💾 Writing LLM message to PostgreSQL (index={message_index}, conv_id={conversation_id})")
+        logger.debug(f"   Text: {text[:100]}...")
+        logger.debug(f"   Embedding: {'present' if embedding else 'none'}")
+        
         message_id = insert_message(
             conversation_id=conversation_id,
             message_index=message_index,
@@ -62,9 +76,15 @@ def write_llm_message(
             type=None,
             priority=None
         )
+        
+        if message_id:
+            logger.info(f"✅ LLM message saved to PostgreSQL (ID: {message_id})")
+        else:
+            logger.warning("⚠️ Failed to get message ID after insert")
+        
         return message_id
     except Exception as e:
-        logger.error(f"Failed to write LLM message: {e}")
+        logger.error(f"❌ Failed to write LLM message: {e}", exc_info=True)
         return None
 
 
@@ -90,8 +110,11 @@ def update_metadata_from_response(
     """
     updated = False
     
-    # Update user message (most recent human message, <= 5 minutes old)
+    # Update user message (most recent human message)
+    # Use message_index instead of timestamp for reliability
     if user_message_metadata:
+        logger.info(f"🔄 Processing user message metadata update")
+        logger.debug(f"   Metadata received: {user_message_metadata}")
         try:
             recent_human = get_recent_messages(
                 conversation_id=conversation_id,
@@ -99,35 +122,37 @@ def update_metadata_from_response(
                 limit=1
             )
             
-            if recent_human:
-                msg = recent_human[0]
-                created_at = msg['created_at']
-                
-                # Check if message is <= 5 minutes old
-                if isinstance(created_at, str):
-                    created_at = datetime.fromisoformat(created_at.replace('Z', '+00:00'))
-                elif isinstance(created_at, datetime):
-                    pass
-                else:
-                    logger.warning(f"Unexpected created_at type: {type(created_at)}")
-                    created_at = None
-                
-                if created_at:
-                    age = datetime.now(created_at.tzinfo) - created_at if created_at.tzinfo else datetime.now() - created_at.replace(tzinfo=None)
-                    
-                    if age <= timedelta(minutes=5):
-                        success = update_message_metadata(
-                            message_id=msg['id'],
-                            type=user_message_metadata.get('type'),
-                            priority=user_message_metadata.get('priority')
-                        )
-                        if success:
-                            updated = True
-                            logger.info(f"Updated user message {msg['id']} metadata")
-                    else:
-                        logger.debug(f"User message too old ({age}), skipping metadata update")
+            if not recent_human:
+                logger.warning(f"⚠️ No recent human messages found for conversation {conversation_id}")
+                return updated
+            
+            msg = recent_human[0]
+            logger.debug(f"   Found recent human message: ID={msg['id']}, index={msg.get('message_index')}, text={msg['text'][:50]}...")
+            
+            # Use message_index as primary identifier - if it's the most recent human message, update it
+            # Don't rely on timestamp due to timezone issues - message_index DESC LIMIT 1 ensures it's the most recent
+            logger.debug(f"   Most recent human message index: {msg.get('message_index')}")
+            
+            # Always update if we found a recent human message
+            logger.info(f"🔄 Updating user message metadata (ID: {msg['id']})")
+            logger.info(f"   Type: {user_message_metadata.get('type')}, Priority: {user_message_metadata.get('priority')}")
+            
+            success = update_message_metadata(
+                message_id=msg['id'],
+                type=user_message_metadata.get('type'),
+                priority=user_message_metadata.get('priority')
+            )
+            if success:
+                updated = True
+                logger.info(f"✅ Updated user message {msg['id']} metadata in PostgreSQL")
+                # Verify the update
+                updated_msg = get_message_by_id(msg['id'])
+                if updated_msg:
+                    logger.info(f"   Verified: type={updated_msg.get('type')}, priority={updated_msg.get('priority')}")
+            else:
+                logger.warning(f"⚠️ Failed to update user message {msg['id']} metadata (update_message_metadata returned False)")
         except Exception as e:
-            logger.error(f"Failed to update user message metadata: {e}")
+            logger.error(f"❌ Failed to update user message metadata: {e}", exc_info=True)
     
     # Update previous LLM message (second most recent LLM message, or most recent if only one)
     if previous_llm_message_metadata:
@@ -147,6 +172,9 @@ def update_metadata_from_response(
                 prev_msg = None
             
             if prev_msg:
+                logger.info(f"🔄 Updating previous LLM message metadata (ID: {prev_msg['id']})")
+                logger.debug(f"   Type: {previous_llm_message_metadata.get('type')}, Priority: {previous_llm_message_metadata.get('priority')}")
+                
                 success = update_message_metadata(
                     message_id=prev_msg['id'],
                     type=previous_llm_message_metadata.get('type'),
@@ -154,7 +182,9 @@ def update_metadata_from_response(
                 )
                 if success:
                     updated = True
-                    logger.info(f"Updated previous LLM message {prev_msg['id']} metadata")
+                    logger.info(f"✅ Updated previous LLM message {prev_msg['id']} metadata in PostgreSQL")
+                else:
+                    logger.warning(f"⚠️ Failed to update previous LLM message {prev_msg['id']} metadata")
         except Exception as e:
             logger.error(f"Failed to update previous LLM message metadata: {e}")
     

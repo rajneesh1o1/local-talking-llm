@@ -24,7 +24,8 @@ OPENAI_MODEL = "gpt-4o-mini"
 OPENAI_BASE_URL = None  # Use None for default, or set custom endpoint
 
 # Ollama Configuration (for local models)
-OLLAMA_BASE_URL = "http://10.250.81.197:11434"  # Default Ollama URL
+# OLLAMA_BASE_URL = "http://192.168.1.146:11434"  # Default Ollama URL
+OLLAMA_BASE_URL = "localhost:11434"
 OLLAMA_MODEL = "llama3.2:latest"  # Change to your preferred local model
 
 # System Prompt (used by all providers)
@@ -53,8 +54,27 @@ CRITICAL: You MUST respond with valid JSON only, no markdown, no explanations. F
 
 The "response" field contains your actual reply with # chunk markers (e.g., "Hello there friend# How are you doing today? #"). 
 The metadata fields help categorize messages for future reference.
-- type: "random_talk" for casual chat, "informative" for factual info, "about_user" for personal details
+
+CRITICAL METADATA CLASSIFICATION RULES:
+- type: Choose EXACTLY ONE value from this list (do NOT return multiple values separated by |):
+  * "about_user" - Personal information about the user (name, preferences, skills, hobbies, location, job, interests, what they like/dislike, personal facts). 
+    Examples: "I like C++", "I'm a developer", "I live in NYC", "I enjoy coding", "My name is John", "I work at Google", "im rajneesh"
+  * "informative" - Factual information, explanations, or educational content that could be useful later
+  * "random_talk" - Casual conversation, jokes, greetings, small talk with no lasting value
+  
 - priority: 0.0-1.0, higher = more useful for future reference
+  * "about_user" messages should typically have priority >= 0.7 (high priority for personalization)
+  * "informative" messages should have priority 0.5-0.8
+  * "random_talk" should have priority <= 0.3
+
+IMPORTANT RULES:
+1. If the user mentions ANY personal information (what they do, like, prefer, their skills, location, name, etc.), 
+   it MUST be classified as "about_user" with priority >= 0.7, NOT "random_talk"!
+2. Return ONLY ONE type value, NOT multiple values separated by "|". Examples:
+   ✅ CORRECT: "type": "about_user"
+   ❌ WRONG: "type": "random_talk | informative | about_user"
+3. The type field must be a single string value, not a list or multiple values.
+
 - Respond ONLY with the JSON object, nothing else."""
 
 # ============================================================================

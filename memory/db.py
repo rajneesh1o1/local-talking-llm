@@ -152,6 +152,8 @@ def update_message_metadata(
         return False
     
     try:
+        logger.debug(f"   Updating message {message_id} with type={type}, priority={priority}")
+        
         with conn.cursor() as cur:
             updates = []
             params = []
@@ -159,24 +161,44 @@ def update_message_metadata(
             if type is not None:
                 updates.append("type = %s")
                 params.append(type)
+                logger.debug(f"   Adding type update: {type}")
             
             if priority is not None:
                 updates.append("priority = %s")
                 params.append(priority)
+                logger.debug(f"   Adding priority update: {priority}")
             
             if not updates:
+                logger.warning(f"   No updates to apply for message {message_id}")
                 return True  # Nothing to update
             
             params.append(message_id)
-            cur.execute(f"""
+            update_sql = f"""
                 UPDATE conversation_memory
                 SET {', '.join(updates)}
                 WHERE id = %s
-            """, params)
+            """
+            logger.debug(f"   Executing SQL: {update_sql}")
+            logger.debug(f"   Parameters: {params}")
+            
+            cur.execute(update_sql, params)
+            rows_affected = cur.rowcount
             conn.commit()
-            return cur.rowcount > 0
+            
+            logger.debug(f"   Rows affected: {rows_affected}")
+            
+            if rows_affected > 0:
+                # Verify the update
+                cur.execute("SELECT type, priority FROM conversation_memory WHERE id = %s", (message_id,))
+                result = cur.fetchone()
+                if result:
+                    logger.debug(f"   Verified update: type={result[0]}, priority={result[1]}")
+                return True
+            else:
+                logger.warning(f"   No rows updated for message {message_id} - message may not exist")
+                return False
     except Exception as e:
-        logger.error(f"Failed to update message metadata: {e}")
+        logger.error(f"❌ Failed to update message metadata: {e}", exc_info=True)
         conn.rollback()
         return False
     finally:
