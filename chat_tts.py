@@ -1,6 +1,11 @@
+import os
 import uuid
 import json
 import logging
+
+# Fix tokenizers parallelism warning
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
+
 from tts.xtts import tts_with_live_playback, speaker_wav
 from memory import (
     init_db, close_pool, embed,
@@ -8,6 +13,7 @@ from memory import (
     write_user_message, write_llm_message, update_metadata_from_response
 )
 from llm.chat import create_llm
+from voice_to_text import voice_to_text_with_fallback
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -127,16 +133,28 @@ short_term_memory = []
 
 
 print("Chat with Gemini + TTS + Memory")
-print("Type your message and press Enter. Type 'quit' or 'exit' to stop.\n")
+print("Voice input enabled - speak your message")
+print("Say 'quit' or 'exit' to stop, or press Ctrl+C\n")
 
 while True:
     try:
-        user_input = input("You: ").strip()
+        # Get voice input instead of keyboard input
+        print("🎤 Listening for your voice... (speak clearly)")
+        user_input = voice_to_text_with_fallback(timeout=3, phrase_time_limit=15).strip()
         
         if not user_input:
+            print("⚠️ No speech detected or could not understand. Try again...\n")
             continue
         
-        if user_input.lower() in ['quit', 'exit', 'q']:
+        # Filter out common false positives from speech recognition
+        false_positives = ["true", "false", "yes", "no", "okay", "ok", "uh", "um", "ah"]
+        if user_input.lower() in false_positives:
+            print(f"⚠️ Detected likely false positive: '{user_input}'. Please try again...\n")
+            continue
+        
+        print(f"You: {user_input}\n")
+        
+        if user_input.lower() in ['quit', 'exit', 'stop', 'goodbye']:
             print("Goodbye!")
             break
         

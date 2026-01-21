@@ -109,3 +109,7 @@ openai>=1.0.0  # For OpenAI (optional)
 # Memory system dependencies
 psycopg2-binary==2.9.9
 sentence-transformers==2.7.0
+
+# Voice-to-text dependencies
+SpeechRecognition==3.10.4
+pyaudio==0.2.14
