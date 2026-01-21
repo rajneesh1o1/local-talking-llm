@@ -1,21 +1,16 @@
-import google.generativeai as genai
-import json
 import uuid
 import logging
-from typing import Optional, Dict, Any
 from tts.xtts import tts_with_live_playback, speaker_wav
 from memory import (
     init_db, close_pool, embed,
     search_similar_messages, format_memories_for_context,
     write_user_message, write_llm_message, update_metadata_from_response
 )
+from llm.chat import create_llm
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
-
-GEMINI_API_KEY = "AIzaSyDOKZB0LcVgassqpZAPQpXRJnNcssMsv04"
-MODEL = "gemini-2.5-flash"
 
 # Memory configuration
 MEMORY_CONFIG = {
@@ -24,57 +19,6 @@ MEMORY_CONFIG = {
     'exclude_type': 'random_talk',
     'memory_window': 10  # Last N messages for short-term context
 }
-
-SYSTEM_PROMPT_BASE = """You are a helpful assistant. Format your responses with these rules:
-1. Break your response into small chunks of 13-15 words maximum
-2. Add "#" after each meaningful chunk
-3. Use simple, everyday words
-4. Make each chunk emotionally complete and satisfying on its own
-5. Keep chunks natural and conversational
-6. Keep overall response short and funny.
-Example format:
-Hello there friend# How are you doing today? # I hope you are feeling well # What can I help you with? # 
-
-CRITICAL: You MUST respond with valid JSON only, no markdown, no explanations. Format:
-{
-  "response": "your actual response text here with # chunk markers",
-  "user_message_metadata": {
-    "type": "random_talk | informative | about_user",
-    "priority": 0.0-1.0
-  },
-  "previous_llm_message_metadata": {
-    "type": "random_talk | informative | about_user",
-    "priority": 0.0-1.0
-  }
-}
-
-The "response" field contains your actual reply with # chunk markers (e.g., "Hello there friend# How are you doing today? #"). 
-The metadata fields help categorize messages for future reference.
-- type: "random_talk" for casual chat, "informative" for factual info, "about_user" for personal details
-- priority: 0.0-1.0, higher = more useful for future reference
-- Respond ONLY with the JSON object, nothing else."""
-
-def parse_llm_response(response_text: str) -> Optional[Dict[str, Any]]:
-    """Parse LLM JSON response, retry once if invalid."""
-    # Try to extract JSON from response
-    response_text = response_text.strip()
-    
-    # Remove markdown code blocks if present
-    if response_text.startswith("```json"):
-        response_text = response_text[7:]
-    if response_text.startswith("```"):
-        response_text = response_text[3:]
-    if response_text.endswith("```"):
-        response_text = response_text[:-3]
-    response_text = response_text.strip()
-    
-    try:
-        parsed = json.loads(response_text)
-        return parsed
-    except json.JSONDecodeError as e:
-        logger.warning(f"Failed to parse JSON response: {e}")
-        logger.debug(f"Response text: {response_text[:200]}")
-        return None
 
 
 def get_memory_context(conversation_id: uuid.UUID, query_text: str) -> str:
@@ -105,8 +49,14 @@ except Exception as e:
     print(f"Warning: Memory system initialization error: {e}")
     print("Continuing without memory...")
 
-# Initialize Gemini
-genai.configure(api_key=GEMINI_API_KEY)
+# Initialize LLM (configure provider in llm/chat.py)
+try:
+    chat = create_llm()
+    print(f"LLM initialized: {chat.__class__.__name__}")
+except Exception as e:
+    print(f"Error initializing LLM: {e}")
+    print("Please check your LLM configuration in llm/chat.py")
+    exit(1)
 
 # Generate conversation ID for this session
 conversation_id = uuid.uuid4()
@@ -115,21 +65,6 @@ message_index = 0
 # Short-term memory window (in-memory only, for context)
 short_term_memory = []
 
-try:
-    model = genai.GenerativeModel(
-        model_name=MODEL,
-        system_instruction=SYSTEM_PROMPT_BASE
-    )
-    chat = model.start_chat(history=[])
-except Exception as e:
-    print(f"Error initializing model {MODEL}: {e}")
-    print("\nTrying alternative model: gemini-pro")
-    MODEL = "gemini-pro"
-    model = genai.GenerativeModel(
-        model_name=MODEL,
-        system_instruction=SYSTEM_PROMPT_BASE
-    )
-    chat = model.start_chat(history=[])
 
 print("Chat with Gemini + TTS + Memory")
 print("Type your message and press Enter. Type 'quit' or 'exit' to stop.\n")
@@ -174,39 +109,16 @@ while True:
         
         # Step 5: Get LLM response (with retry on JSON parse failure)
         print("Thinking...")
-        parsed_response = None
-        response_text = None
-        
-        for attempt in range(2):  # Try twice
-            try:
-                response = chat.send_message(full_prompt)
-                response_text = response.text
-                parsed_response = parse_llm_response(response_text)
-                
-                if parsed_response:
-                    break  # Success, exit retry loop
-                elif attempt == 0:
-                    logger.warning("Failed to parse JSON response, retrying...")
-                    # Add more explicit instruction on retry
-                    full_prompt = f"{full_prompt}\n\nIMPORTANT: Respond ONLY with valid JSON, no markdown, no explanations."
-            except Exception as e:
-                logger.error(f"Error getting LLM response (attempt {attempt + 1}): {e}")
-                if attempt == 0:
-                    continue  # Retry once
-                else:
-                    break
-        
-        # Step 6: Extract response and metadata
-        if parsed_response:
-            assistant_message = parsed_response.get('response', response_text or '')
-            user_metadata = parsed_response.get('user_message_metadata')
-            prev_llm_metadata = parsed_response.get('previous_llm_message_metadata')
-        else:
-            # Fallback: use raw response if JSON parsing fails after retry
-            assistant_message = response_text or "I apologize, but I'm having trouble formatting my response."
+        try:
+            llm_response = chat.send_message(full_prompt, retry_on_parse_failure=True)
+            assistant_message = llm_response['response']
+            user_metadata = llm_response['user_message_metadata']
+            prev_llm_metadata = llm_response['previous_llm_message_metadata']
+        except Exception as e:
+            logger.error(f"Error getting LLM response: {e}")
+            assistant_message = "I apologize, but I'm having trouble responding right now."
             user_metadata = None
             prev_llm_metadata = None
-            logger.warning("Failed to parse JSON response after retry, using raw text")
         
         print(f"\nAssistant: {assistant_message}\n")
         
