@@ -2,6 +2,7 @@ import os
 import uuid
 import json
 import logging
+import threading
 
 # Fix tokenizers parallelism warning
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
@@ -18,6 +19,45 @@ from voice_to_text import voice_to_text_with_fallback
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# Visual context configuration
+VISUAL_CONTEXT_FILE = "visual_context.json"
+visual_context_lock = threading.Lock()
+
+def get_visual_context(last_n=3):
+    """
+    Retrieve last N visual detections from shared storage.
+    Returns raw JSON as string for LLM context.
+    """
+    try:
+        if not os.path.exists(VISUAL_CONTEXT_FILE):
+            return ""
+        
+        with visual_context_lock:
+            with open(VISUAL_CONTEXT_FILE, 'r') as f:
+                data = json.load(f)
+        
+        visual_history = data.get("visual_history", [])
+        if not visual_history:
+            return ""
+        
+        # Get last N entries
+        recent_entries = visual_history[-last_n:]
+        
+        # Return entire JSON as-is with header
+        visual_data = {
+            "visual_history": recent_entries
+        }
+        
+        context = "=== VISUAL CONTEXT (Real-time vision data from camera) ===\n"
+        context += json.dumps(visual_data, indent=2, default=str)
+        context += "\n=== END VISUAL CONTEXT ==="
+        
+        return context
+        
+    except Exception as e:
+        logger.error(f"Failed to load visual context: {e}")
+        return ""
 
 # Memory configuration
 MEMORY_CONFIG = {
@@ -136,8 +176,15 @@ print("Chat with Gemini + TTS + Memory")
 print("Voice input enabled - speak your message")
 print("Say 'quit' or 'exit' to stop, or press Ctrl+C\n")
 
+y = 0
 while True:
     try:
+        # if y==0:
+        #     user_input = "can you see me?"
+        # if y==1:
+        #     user_input = "can you tell me what's near by objects around me"
+        
+        # y = y+1
         # Get voice input instead of keyboard input
         print("🎤 Listening for your voice... (speak clearly)")
         user_input = voice_to_text_with_fallback(timeout=3, phrase_time_limit=15).strip()
@@ -183,13 +230,30 @@ while True:
         logger.info("=" * 60)
         memory_context = get_memory_context(conversation_id, user_input)
         
-        # Step 4: Build prompt with memory context
+        # Step 3.5: Retrieve visual context (last 3 detections)
+        logger.info("👁️ VISUAL CONTEXT - Loading recent visual observations")
+        visual_context = get_visual_context(last_n=3)
+        if visual_context:
+            logger.info(f"   Visual context available ({visual_context.count('Timestamp')} observations)")
+        else:
+            logger.info("   No visual context available")
+        
+        # Step 4: Build prompt with memory context AND visual context
+        context_parts = []
+        
+        if visual_context:
+            context_parts.append(visual_context)
+            logger.info("📝 Injecting visual context into LLM prompt")
+        
         if memory_context:
+            context_parts.append(memory_context)
             logger.info("📝 Injecting memory context into LLM prompt")
-            full_prompt = f"{memory_context}\n\nUser: {user_input}"
+        
+        if context_parts:
+            full_prompt = "\n\n".join(context_parts) + f"\n\nUser: {user_input}"
             logger.debug(f"   Full prompt length: {len(full_prompt)} characters")
         else:
-            logger.info("   No memory context available, using user input only")
+            logger.info("   No context available, using user input only")
             full_prompt = user_input
         logger.info("=" * 60)
         

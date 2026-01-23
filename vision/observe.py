@@ -3,9 +3,14 @@ import mediapipe as mp
 import math
 import time
 import os
+import json
+import logging
 from collections import deque
 import numpy as np
 from ultralytics import YOLO
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 # ========== YOLO Object Detection Setup ==========
 yolo_model = YOLO("yolov8s.pt")
@@ -167,11 +172,65 @@ def analyze_hand(hand):
         "middle_finger": middle_finger
     }
 
+# ========== Shared Storage for Visual Context ==========
+import threading
+from datetime import datetime
+
+VISUAL_CONTEXT_FILE = "../visual_context.json"
+visual_context_lock = threading.Lock()
+
+def save_visual_context(detections):
+    """Save detection data to shared JSON file (maintains last 5 entries)"""
+    try:
+        with visual_context_lock:
+            # Read existing data
+            if os.path.exists(VISUAL_CONTEXT_FILE):
+                with open(VISUAL_CONTEXT_FILE, 'r') as f:
+                    data = json.load(f)
+            else:
+                data = {"visual_history": []}
+            
+            # Deduplicate detections by person name (including "Unknown")
+            person_map = {}
+            non_person_objects = []
+            
+            # for detection in detections:
+            #     if detection.get("object") == "person" and detection.get("person_data"):
+            #         person_data = detection["person_data"]
+            #         name = person_data.get("name", "Unknown")
+                    
+            #         # If person with same name exists, override with latest detection
+            #         person_map[name] = detection
+            #     else:
+            #         # Keep non-person objects as-is
+            #         non_person_objects.append(detection)
+            
+            # # Combine deduplicated persons and other objects
+            # deduplicated_detections = list(person_map.values()) + non_person_objects
+            
+            # Add new entry with timestamp
+            entry = {
+                "timestamp": datetime.now().isoformat(),
+                "detections": detections
+            }
+            
+            data["visual_history"].append(entry)
+            
+            # Keep only last 5 entries
+            data["visual_history"] = data["visual_history"][-5:]
+            
+            # Write back to file
+            with open(VISUAL_CONTEXT_FILE, 'w') as f:
+                json.dump(data, f, indent=2, default=str)
+                
+    except Exception as e:
+        logger.error(f"Failed to save visual context: {e}")
+
 # ========== Main Loop ==========
 mouth_history = deque(maxlen=10)
 hand_seen_time = {"left": 0, "right": 0}
 
-detection_interval = 1.0  # 1 second
+detection_interval = 5.0  # 1 second
 last_detection_time = 0
 last_yolo_detections = []
 last_people_data = []
@@ -338,6 +397,9 @@ while cap.isOpened():
                 bbox = detection["bbox"]
                 print(f"  - {detection['object']}: confidence={detection['confidence']}, "
                       f"bbox={bbox}")
+        
+        # 6. Save to shared storage for LLM context
+        save_visual_context(combined_detections)
         
         last_yolo_detections = yolo_detections
         last_people_data = people_data

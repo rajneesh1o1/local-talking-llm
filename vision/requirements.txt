@@ -1,0 +1,39 @@
+# Vision System Requirements
+# Install in separate venv: python3 -m venv vision_venv
+# Then: source vision_venv/bin/activate
+# Then: pip install -r requirements.txt
+
+# Object Detection
+ultralytics==8.3.63
+
+# Face & Body Tracking
+mediapipe==0.10.9
+
+# Computer Vision
+opencv-python==4.10.0.84
+
+# Core dependencies
+numpy>=1.26.0,<2.0
+protobuf==3.20.3
+
+
+
+# # suggested:
+# ----------------------------------------------------
+# # Vision System Requirements
+# # Install in separate venv: python3 -m venv venv
+# # Then: source venv/bin/activate
+# # Then: pip install -r requirements.txt
+
+# # Object Detection
+# ultralytics>=8.3.63
+
+# # Face & Body Tracking (must use 0.10.5-0.10.9 range for mp.solutions API)
+# mediapipe>=0.10.5,<=0.10.9
+
+# # Computer Vision
+# opencv-python>=4.10.0
+
+# # Core dependencies
+# numpy>=1.26.0
+# protobuf==3.20.3
