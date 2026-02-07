@@ -1,0 +1,60 @@
+{
+  "visual_history": [
+    {
+      "timestamp": "2026-02-08T01:01:20.511853",
+      "detections": []
+    },
+    {
+      "timestamp": "2026-02-08T01:01:25.516821",
+      "detections": []
+    },
+    {
+      "timestamp": "2026-02-08T01:01:30.538322",
+      "detections": [
+        {
+          "object": "person",
+          "person_data": null,
+          "confidence": 0.62,
+          "bbox": [
+            302,
+            15,
+            455,
+            506
+          ]
+        }
+      ]
+    },
+    {
+      "timestamp": "2026-02-08T01:01:35.557201",
+      "detections": [
+        {
+          "object": "person",
+          "person_data": null,
+          "confidence": 0.39,
+          "bbox": [
+            302,
+            40,
+            452,
+            508
+          ]
+        }
+      ]
+    },
+    {
+      "timestamp": "2026-02-08T01:01:40.589251",
+      "detections": [
+        {
+          "object": "person",
+          "person_data": null,
+          "confidence": 0.28,
+          "bbox": [
+            296,
+            31,
+            449,
+            509
+          ]
+        }
+      ]
+    }
+  ]
+}

@@ -226,6 +226,31 @@ def save_visual_context(detections):
     except Exception as e:
         logger.error(f"Failed to save visual context: {e}")
 
+# ========== Video Source Configuration ==========
+DRONE_IP = "192.168.1.1"
+RTSP_PORT = 7070
+DRONE_RTSP_URL = f"rtsp://{DRONE_IP}:{RTSP_PORT}/webcam"
+
+# Video source: 0 = Mac camera, DRONE_RTSP_URL = drone camera
+video_sources = {
+    "mac": 0,
+    "drone": DRONE_RTSP_URL
+}
+current_source = "mac"  # Start with Mac camera
+
+def switch_video_source(cap, new_source):
+    """Switch between video sources"""
+    cap.release()
+    time.sleep(0.2)  # Give time for release
+    
+    if new_source == "drone":
+        new_cap = cv2.VideoCapture(DRONE_RTSP_URL, cv2.CAP_FFMPEG)
+        new_cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)  # Minimal buffer for low latency
+    else:
+        new_cap = cv2.VideoCapture(0)
+    
+    return new_cap
+
 # ========== Main Loop ==========
 mouth_history = deque(maxlen=10)
 hand_seen_time = {"left": 0, "right": 0}
@@ -236,12 +261,16 @@ last_yolo_detections = []
 last_people_data = []
 last_recognized_faces = []
 
-cap = cv2.VideoCapture(0)
+cap = cv2.VideoCapture(video_sources[current_source])
 
 print("Starting combined observation system...")
 print("Object Detection + Face Recognition + Activity Detection")
 print("Detection interval: 1 second")
-print("Press 'q' to quit.\n")
+print(f"Video source: {current_source.upper()}")
+print("\nControls:")
+print("  [q] Quit")
+print("  [c] Toggle camera (Mac ↔ Drone)")
+print()
 
 while cap.isOpened():
     ret, frame = cap.read()
@@ -425,10 +454,29 @@ while cap.isOpened():
             cv2.putText(frame, label, (x1, y1 - 10),
                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 2)
     
+    # Add source indicator on frame
+    source_text = f"Source: {current_source.upper()}"
+    cv2.putText(frame, source_text, (10, 30), 
+               cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
+    
     cv2.imshow("Observer - Combined Detection", frame)
     
-    if cv2.waitKey(1) & 0xFF == ord('q'):
+    # Keyboard controls
+    key = cv2.waitKey(1) & 0xFF
+    if key == ord('q'):
         break
+    elif key == ord('c'):
+        # Toggle camera source
+        current_source = "drone" if current_source == "mac" else "mac"
+        print(f"\n🔄 Switching to {current_source.upper()} camera...")
+        cap = switch_video_source(cap, current_source)
+        if cap.isOpened():
+            print(f"✓ Connected to {current_source.upper()} camera")
+        else:
+            print(f"✗ Failed to connect to {current_source.upper()} camera, reverting...")
+            current_source = "drone" if current_source == "mac" else "mac"
+            cap = switch_video_source(cap, current_source)
+        print()
 
 cap.release()
 cv2.destroyAllWindows()
